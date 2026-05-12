@@ -1,0 +1,65 @@
+name: EDGAR Filing Monitor (Tier 1)
+
+on:
+  schedule:
+    - cron: '0 10 * * *'  # Daily at 10 AM UTC
+  workflow_dispatch:      # Allow manual trigger
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Check for new EDGAR filings
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python - << 'EOF'
+          import requests
+          import json
+          import os
+          from datetime import datetime
+
+          # Tier 1 issuers
+          issuers = {
+              "CASH": "0000907471",
+              "TBBK": "0001295401",
+              "GDOT": "0001386278",
+              "CUBI": "0001488813"
+          }
+
+          headers = {
+              "User-Agent": "Operational-RIP-v1.0 (github.com/vikram84k/operational-rip-v1.0)"
+          }
+
+          new_filings = []
+
+          for ticker, cik in issuers.items():
+              url = f"https://data.sec.gov/submissions/CIK{cik}.json"
+              response = requests.get(url, headers=headers)
+              if response.status_code == 200:
+                  data = response.json()
+                  recent_filings = data.get("filings", {}).get("recent", {})
+                  if recent_filings and recent_filings.get("accessionNumber"):
+                      latest_date = recent_filings["filingDate"][0] if isinstance(recent_filings["filingDate"], list) else recent_filings["filingDate"]
+                      form = recent_filings["form"][0] if isinstance(recent_filings["form"], list) else recent_filings["form"]
+                      print(f"✓ {ticker} | Latest: {latest_date} | Form: {form}")
+                      if form in ["10-K", "10-Q", "8-K"]:
+                          new_filings.append(f"{ticker} - {form} filed on {latest_date}")
+              else:
+                  print(f"✗ Failed to fetch {ticker}")
+
+          if new_filings:
+              print("New filings detected!")
+              # For now, just log. Future: create issue
+              print("\n".join(new_filings))
+          else:
+              print("No new major filings detected today.")
+          EOF
